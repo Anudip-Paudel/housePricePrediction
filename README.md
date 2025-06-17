@@ -1,2 +1,1 @@
-# housePri
-cePrediction
+# housePricePrediction
