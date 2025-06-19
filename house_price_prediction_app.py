@@ -1,91 +1,61 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, OrdinalEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score
-import seaborn as sns
-import matplotlib.pyplot as plt
-from scipy import stats
+import pickle
 
-# Load and preprocess data
-@st.cache_data
-def load_data():
-    data = pd.read_csv('Housing.csv')
+# Load the trained model
+with open("model.pkl", "rb") as f:
+    model = pickle.load(f)
 
-    # Remove outliers
-    z_scores = np.abs(stats.zscore(data["price"]))
-    data = data[z_scores < 3]
+# Load the price scaler (if you want to inverse-transform predictions)
+with open("price_scaler.pkl", "rb") as f:
+    price_scaler = pickle.load(f)
 
-    # Scale price
-    scaler = MinMaxScaler()
-    data['price'] = scaler.fit_transform(data[['price']])
+st.title("🏠 House Price Prediction")
 
-    # Encode binary columns
-    binary_cols = ['mainroad', 'guestroom', 'basement', 'hotwaterheating', 'airconditioning', 'prefarea']
-    for col in binary_cols:
-        data[col] = data[col].map({'yes': 1, 'no': 0})
+# Reusable Yes/No selector
+def yes_no_to_binary(label):
+    return 1 if st.selectbox(label, ['Yes', 'No']) == 'Yes' else 0
 
-    # Encode ordinal column
-    ordinal_encoder = OrdinalEncoder(categories=[['furnished', 'semi-furnished', 'unfurnished']])
-    data["furnishingstatus"] = ordinal_encoder.fit_transform(data[['furnishingstatus']])
+# User Inputs
+area = st.number_input("Area (sqft)", value=3000)
+bedrooms = st.number_input("Bedrooms", value=3)
+bathrooms = st.number_input("Bathrooms", value=2)
+stories = st.number_input("Stories", value=1)
+mainroad = yes_no_to_binary("Main Road Access")
+guestroom = yes_no_to_binary("Guest Room")
+basement = yes_no_to_binary("Basement")
+hotwaterheating = yes_no_to_binary("Hot Water Heating")
+airconditioning = yes_no_to_binary("Air Conditioning")
+parking = st.number_input("Parking Spaces", value=1)
+prefarea = yes_no_to_binary("Preferred Area")
 
-    return data
+# Furnishing status (Ordinal Encoding)
+furnishing = st.selectbox("Furnishing Status", ["unfurnished", "semi-furnished", "furnished"])
+furnishing_map = {
+    "unfurnished": 0,
+    "semi-furnished": 1,
+    "furnished": 2
+}
+furnishing_encoded = furnishing_map[furnishing]
 
-# Train model
-@st.cache_resource
-def train_model(data):
-    y = data['price']
-    X = data.drop(['price'], axis=1)
-    model = LinearRegression()
-    model.fit(X, y)
-    return model, X.columns
+# Build input DataFrame
+input_data = pd.DataFrame([{
+    "area": area,
+    "bedrooms": bedrooms,
+    "bathrooms": bathrooms,
+    "stories": stories,
+    "mainroad": mainroad,
+    "guestroom": guestroom,
+    "basement": basement,
+    "hotwaterheating": hotwaterheating,
+    "airconditioning": airconditioning,
+    "parking": parking,
+    "prefarea": prefarea,
+    "furnishingstatus": furnishing_encoded
+}])
 
-# Streamlit UI
-def main():
-    st.title("🏡 House Price Predictor")
-    data = load_data()
-    model, feature_names = train_model(data)
-
-    st.subheader("Enter House Features:")
-
-    user_input = {}
-    for col in feature_names:
-        if col in ['mainroad', 'guestroom', 'basement', 'hotwaterheating', 'airconditioning', 'prefarea']:
-            user_input[col] = st.selectbox(col, ['yes', 'no'])
-        elif col == 'furnishingstatus':
-            user_input[col] = st.selectbox(col, ['furnished', 'semi-furnished', 'unfurnished'])
-        else:
-            user_input[col] = st.number_input(col, min_value=0)
-
-    # Preprocess user input
-    input_df = pd.DataFrame([user_input])
-    for col in ['mainroad', 'guestroom', 'basement', 'hotwaterheating', 'airconditioning', 'prefarea']:
-        input_df[col] = input_df[col].map({'yes': 1, 'no': 0})
-    ord_enc = OrdinalEncoder(categories=[['furnished', 'semi-furnished', 'unfurnished']])
-    input_df['furnishingstatus'] = ord_enc.fit_transform(input_df[['furnishingstatus']])
-
-    # Predict normalized price
-    pred_price = model.predict(input_df)[0]
-
-    # Convert to actual price
-    scaler = MinMaxScaler()
-    scaler.fit(pd.read_csv('Housing.csv')[['price']])  # Load original data for inverse scaling
-    actual_price = scaler.inverse_transform([[pred_price]])[0][0]
-
-    # Show result
-    st.success(f"🏷️ Predicted House Price: ₹ {actual_price:,.2f}")
-
-    # Optional visualizations
-    if st.checkbox("📊 Show Correlation Heatmap"):
-        data_copy = data.copy()
-        data_copy.drop(['mainroad', 'guestroom', 'basement', 'hotwaterheating',
-                        'airconditioning', 'prefarea'], axis=1, inplace=True)
-        st.subheader("Correlation Heatmap")
-        fig, ax = plt.subplots()
-        sns.heatmap(data_copy.corr(), annot=True, cmap='coolwarm', ax=ax)
-        st.pyplot(fig)
-
-if __name__ == "__main__":
-    main()
+# Predict
+if st.button("Predict Price"):
+    scaled_price = model.predict(input_data)[0]
+    actual_price = price_scaler.inverse_transform([[scaled_price]])[0][0]
+    st.success(f"🏷️ Estimated House Price: ₹ {int(actual_price):,}")
